@@ -1,0 +1,140 @@
+/* ============================================
+   Atlas Studio — Design System
+   "Quiet Intelligence"
+   ============================================ */
+
+@import "tailwindcss";
+
+/* ---- Design Tokens ---- */
+@theme {
+  --color-base: #09090b;
+  --color-surface: #111113;
+  --color-elevated: #18181b;
+  --color-hover: #1f1f23;
+
+  --color-accent: #6366f1;
+  --color-accent-text: #a5b4fc;
+
+  --color-success: #22c55e;
+  --color-warning: #eab308;
+  --color-error: #dc2626;
+
+  --color-text-primary: #fafafa;
+  --color-text-secondary: #a1a1aa;
+  --color-text-muted: #52525b;
+
+  --color-border-subtle: rgba(255,255,255,0.06);
+  --color-border-default: rgba(255,255,255,0.10);
+  --color-border-focus: rgba(99,102,241,0.40);
+
+  /* Tailwind overrides for primary palette */
+  --color-primary-400: #818cf8;
+  --color-primary-500: #6366f1;
+  --color-primary-600: #4f46e5;
+
+  --color-gray-750: #2d3748;
+  --color-gray-850: #1a202c;
+  --color-gray-950: #09090b;
+
+  --font-family-sans: 'Inter', system-ui, -apple-system, sans-serif;
+
+  --shadow-xs: 0 1px 2px rgba(0,0,0,0.2);
+  --shadow-sm: 0 2px 8px rgba(0,0,0,0.15);
+  --shadow-md: 0 4px 16px rgba(0,0,0,0.12);
+}
+
+/* ---- Base ---- */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  background-color: var(--color-base);
+  color: var(--color-text-primary);
+  line-height: 1.5;
+}
+
+/* ---- Scrollbar (Discreta) ---- */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-border-default);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-muted);
+}
+
+/* ---- Selection ---- */
+::selection {
+  background-color: rgba(99, 102, 241, 0.20);
+  color: var(--color-text-primary);
+}
+
+/* ---- Focus Visible ---- */
+:focus-visible {
+  outline: 2px solid var(--color-border-focus);
+  outline-offset: 2px;
+}
+
+/* ---- Animations (Suaves e funcionais) ---- */
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@utility animate-fade-in {
+  animation: fade-in 200ms ease-out;
+}
+
+@utility animate-fade-in-up {
+  animation: fade-in-up 250ms ease-out both;
+}
+
+@utility animate-spin-slow {
+  animation: spin 800ms linear infinite;
+}
+
+@utility animate-toast-in {
+  animation: toast-in 200ms ease-out;
+}

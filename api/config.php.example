@@ -1,0 +1,8 @@
+<?php
+// Configuração de exemplo para o banco de dados
+// Renomeie para config.php
+$host = getenv('DB_HOST') ?: 'localhost'; 
+$db   = getenv('DB_NAME') ?: 'u786088869_imagens';
+$user = getenv('DB_USER') ?: 'u786088869_imagens';
+$pass = getenv('DB_PASS') ?: 'ATLAS.vps2026'; // Mantenha vazio ou configure em env variables para segurança
+?>

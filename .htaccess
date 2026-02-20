@@ -1,0 +1,8 @@
+# Enable URL rewriting
+Options +FollowSymLinks
+RewriteEngine On
+
+# Redirect requests to index.html if not a file or directory (SPA)
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^ index.html [QSA,L]
