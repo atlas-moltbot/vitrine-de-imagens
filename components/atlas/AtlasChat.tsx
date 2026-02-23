@@ -111,8 +111,10 @@ export const AtlasChat: React.FC = () => {
         const result = await chatRef.current.sendMessage({ message: currentInput, fileParts });
         setMessages(prev => [...prev, { role: 'model', text: result.text }]);
       }
-    } catch (err) {
-      setMessages(prev => [...prev, { role: 'model', text: "Desculpe, Jean. Tive um problema ao processar sua solicitação. Verifique sua chave API ou conexão." }]);
+    } catch (err: any) {
+      const errorDetail = err?.message || 'Erro desconhecido';
+      console.error('[AtlasChat] Error:', err);
+      setMessages(prev => [...prev, { role: 'model', text: `Desculpe, Jean. Tive um problema ao processar sua solicitação.\n\n**Detalhes:** ${errorDetail}\n\nVerifique se o servidor proxy (porta 8000) está rodando e se a chave API está configurada no .env.` }]);
     } finally {
       setIsTyping(false);
     }
@@ -304,7 +306,7 @@ export const AtlasChat: React.FC = () => {
               <div className="absolute right-1 top-1 bottom-1">
                 <button
                     onClick={handleSend}
-                    disabled={!input.trim() || isTyping}
+                    disabled={(!input.trim() && !selectedFile) || isTyping}
                     className="h-full px-3 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-30 disabled:hover:bg-indigo-600 text-white rounded-lg transition-colors duration-200 flex items-center justify-center shadow-md"
                     aria-label="Enviar mensagem"
                 >
