@@ -8,6 +8,9 @@ header("Content-Type: application/json");
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(200);
     exit();
+// Carregar config.php local, caso exista, para injetar variaveis de ambiente ou constantes
+if (file_exists(__DIR__ . '/config.php')) {
+    require_once __DIR__ . '/config.php';
 }
 
 $method = $_SERVER['REQUEST_METHOD'];
@@ -17,8 +20,12 @@ if ($method !== 'POST') {
     exit();
 }
 
-// Obter a chave da API do ambiente (seguro) ou de um config.php
+// Obter a chave da API do ambiente (seguro) ou da constante definida em config.php
 $apiKey = getenv('GEMINI_API_KEY');
+
+if (!$apiKey && defined('GEMINI_API_KEY')) {
+    $apiKey = GEMINI_API_KEY;
+}
 
 // Fallback para caso o usuário tenha mantido a variável antiga no servidor
 if (!$apiKey) {
