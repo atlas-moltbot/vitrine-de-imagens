@@ -47,8 +47,7 @@ import { ImageComparison } from "@/components/ImageComparison";
 
 import { Tooltip } from "@/components/Tooltip";
 import { LandingPage } from "@/components/LandingPage";
-import { AtlasConnector } from "@/components/AtlasConnector";
-import { AIChatbot } from "@/components/AIChatbot";
+import { AtlasConnector, AtlasChat } from "@/components/atlas";
 import { logger } from "@/utils/logger";
 import { PromptMenu } from "@/components/PromptMenu";
 import { LibraryPage } from "@/components/LibraryPage";
@@ -1310,8 +1309,8 @@ const App: React.FC = () => {
         accept="image/png,image/jpeg,image/webp"
         aria-label="Importar imagem para biblioteca"
       />
-      
-      <AIChatbot />
+      {/* ATLAS WIDGETS */}
+      <AtlasChat />
     </div>
   );
 };
