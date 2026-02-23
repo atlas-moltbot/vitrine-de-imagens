@@ -25,6 +25,7 @@ dist-ssr
 # Environment & Secrets
 .env
 /config.php
+api/config.php
 secrets.php
 
 test-imagen.js
