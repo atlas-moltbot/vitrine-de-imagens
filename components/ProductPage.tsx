@@ -8,7 +8,7 @@ import { PromptMenu } from './PromptMenu';
 import { LoadingSpinner } from './LoadingSpinner';
 import { ImageComparison } from './ImageComparison';
 import { ImageRegionSelector } from './ImageRegionSelector';
-import { translateToPortuguese } from '../services/geminiService';
+import { translatePromptToPtBrForUser } from '../services/geminiService';
 import { Toast, ToastType } from './Toast';
 
 interface ProductPageProps {
@@ -163,7 +163,7 @@ export const ProductPage: React.FC<ProductPageProps> = ({
                             if (!editPrompt) return;
                             setLoading(true);
                             try {
-                                const translated = await translateToPortuguese(editPrompt);
+                                const translated = await translatePromptToPtBrForUser(editPrompt);
                                 setEditPrompt(translated);
                             } catch(e) { console.error(e); }
                             setLoading(false);

@@ -1,40 +1,24 @@
-import { GoogleGenAI, Type, SafetyFilterLevel, PersonGeneration } from "@google/genai";
 import { AspectRatio, AnalysisResult } from "../types";
 import { logger } from "../utils/logger";
+import { ModelRouter, ModelCapability } from "./ModelRouter";
 
-/* ============================================================
-   CLIENT
-============================================================ */
-
-const getClient = (): GoogleGenAI => {
-  const localKey = localStorage.getItem("lumina_api_key");
-  const envKey = import.meta.env.VITE_GOOGLE_GEMINI_API_KEY;
-
-  const apiKey = localKey || envKey;
-
-  if (!apiKey) {
-    throw new Error(
-      "Chave API não configurada. Configure sua Google API Key.",
-    );
-  }
-
-  return new GoogleGenAI({ apiKey });
-};
-
-/* ============================================================
-   ERROR
-============================================================ */
+// Detectamos se é local ou prod pelo host
+const isLocal = typeof window !== 'undefined' && window.location.hostname === 'localhost';
+const PROXY_URL = isLocal ? "http://localhost:8000/api/gemini.php" : "/api/gemini.php"; 
 
 export class GeminiError extends Error {
   constructor(
     public message: string,
-    public code: "QUOTA" | "CONTENT" | "GENERIC" | "NOT_FOUND" | "UNKNOWN" | "NETWORK",
+    public code: "QUOTA" | "CONTENT" | "GENERIC" | "NOT_FOUND" | "NETWORK" | "TIMEOUT",
   ) {
     super(message);
     this.name = "GeminiError";
   }
 }
 
+/**
+ * Parses generic proxy/API errors into user-friendly GeminiError.
+ */
 const handleGeminiError = (error: any): never => {
   logger.error("Gemini API Error", error);
 
@@ -43,140 +27,140 @@ const handleGeminiError = (error: any): never => {
     error?.error?.message ||
     JSON.stringify(error);
 
-  if (
-    msg.includes("429") ||
-    msg.includes("quota") ||
-    msg.includes("resource_exhausted")
-  ) {
-    throw new GeminiError(
-      "Cota excedida. Tente novamente mais tarde.",
-      "QUOTA",
-    );
+  if (msg.includes("429") || msg.includes("quota") || msg.includes("resource_exhausted")) {
+    throw new GeminiError("Cota excedida ou limite de requisições atingido. Tente novamente em instantes.", "QUOTA");
   }
 
-  if (
-    msg.includes("safety") ||
-    msg.includes("blocked") ||
-    msg.includes("content_filter")
-  ) {
-    throw new GeminiError(
-      "Conteúdo bloqueado pelos filtros de segurança.",
-      "CONTENT",
-    );
+  if (msg.includes("safety") || msg.includes("blocked") || msg.includes("content_filter")) {
+    throw new GeminiError("Conteúdo bloqueado pelos filtros de segurança.", "CONTENT");
   }
 
-  if (msg.includes("404")) {
-    throw new GeminiError(
-      "Modelo não encontrado ou sem permissão.",
-      "NOT_FOUND",
-    );
+  if (msg.includes("404") || msg.includes("not found")) {
+    throw new GeminiError("Modelo não encontrado ou acesso restrito.", "NOT_FOUND");
+  }
+
+  if (error.name === "AbortError" || msg.includes("network") || msg.includes("fetch")) {
+    throw new GeminiError("Erro de rede ou timeout na conexão com a IA.", "NETWORK");
   }
 
   throw new GeminiError(msg, "GENERIC");
 };
 
+/**
+ * Fetch with Exponential Backoff + Timeout
+ */
+async function fetchWithRetry(url: string, options: RequestInit, maxRetries = 2): Promise<any> {
+  let attempt = 0;
+  
+  while (attempt <= maxRetries) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 60000); // 60s timeout
+    
+    try {
+      const response = await fetch(url, { ...options, signal: controller.signal });
+      clearTimeout(timeoutId);
+      
+      const data = await response.json();
+      
+      if (!response.ok) {
+         if (response.status === 429 && attempt < maxRetries) {
+            // Rate limited, wait and retry
+            const delay = Math.pow(2, attempt) * 1000 + Math.random() * 1000;
+            await new Promise(r => setTimeout(r, delay));
+            attempt++;
+            continue;
+         }
+         throw new Error(data.error?.message || data.error || `HTTP ${response.status}`);
+      }
+      return data;
+    } catch (error: any) {
+      clearTimeout(timeoutId);
+      if (attempt >= maxRetries || error.name === 'AbortError') {
+        throw error;
+      }
+      const delay = Math.pow(2, attempt) * 1000 + Math.random() * 1000;
+      await new Promise(r => setTimeout(r, delay));
+      attempt++;
+    }
+  }
+}
+
+/**
+ * Standard Proxy Caller
+ */
+async function callProxy(capability: ModelCapability, endpoint: 'generateContent' | 'generateImages', payload: any) {
+  let model = ModelRouter.getModel(capability);
+  
+  try {
+      return await fetchWithRetry(PROXY_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ endpoint, model, payload }),
+      });
+  } catch (error: any) {
+      // Automatic Fallback Check logic for 404
+      if (error.message?.includes('404')) {
+         const fallbackModel = ModelRouter.getFallback(model);
+         if (fallbackModel) {
+            logger.warn(`Modelo ${model} falhou com 404. Tentando fallback para ${fallbackModel}.`);
+            return await fetchWithRetry(PROXY_URL, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ endpoint, model: fallbackModel, payload }),
+            });
+         }
+      }
+      throw error;
+  }
+}
+
 /* ============================================================
-   SUPPORTED MODELS
+   HELPER FUNCTIONS
 ============================================================ */
 
-const GEMINI_IMAGE_MODELS = [
-  "gemini-3-pro-image-preview",
-  "gemini-2.5-flash-image",
-];
-
-const IMAGEN_MODELS = [
-  "imagen-4.0-generate-001",
-  "imagen-4.0-ultra-generate-001",
-  "imagen-4.0-fast-generate-001",
-];
-
-/* ============================================================
-   HELPER FUNCTIONS (Restored)
-============================================================ */
-
-export const fileToGenerativePart = async (
-  file: File,
-  ): Promise<{ mimeType: string; data: string }> => {
+export const fileToGenerativePart = async (file: File): Promise<{ mimeType: string; data: string }> => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onloadend = () => {
       const base64String = reader.result as string;
       const base64Data = base64String.split(",")[1];
-      resolve({
-        mimeType: file.type,
-        data: base64Data,
-      });
+      resolve({ mimeType: file.type, data: base64Data });
     };
     reader.onerror = reject;
     reader.readAsDataURL(file);
   });
 };
 
-export const base64ToFile = async (
-  base64Url: string,
-  filename: string,
-  ): Promise<File> => {
+export const base64ToFile = async (base64Url: string, filename: string): Promise<File> => {
   const res = await fetch(base64Url);
   const blob = await res.blob();
   return new File([blob], filename, { type: "image/png" });
 };
 
 /* ============================================================
-   IMAGE ANALYSIS & EDITING (Restored)
+   IMAGE ANALYSIS & EDITING
 ============================================================ */
 
 export const analyzeImage = async (file: File): Promise<AnalysisResult> => {
   try {
-      const ai = getClient();
       const imagePart = await fileToGenerativePart(file);
-
-      const response = await ai.models.generateContent({
-        model: "gemini-3-pro-preview",
-        contents: {
+      const payload = {
+        contents: [{
           parts: [
             { inlineData: imagePart },
-            {
-              text: "Analise esta imagem detalhadamente. Forneça o resultado em Português do Brasil. Extraia a descrição da cena, objetos principais, humor, iluminação e cores dominantes.",
-            },
-          ],
-        },
-        config: {
-          thinkingConfig: { thinkingBudget: 32768 },
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              description: {
-                type: Type.STRING,
-                description:
-                  "Um parágrafo detalhado descrevendo a cena em Português.",
-              },
-              objects: {
-                type: Type.ARRAY,
-                items: { type: Type.STRING },
-                description: "Lista de objetos visíveis em Português.",
-              },
-              mood: {
-                type: Type.STRING,
-                description: "A atmosfera emocional em Português.",
-              },
-              lighting: {
-                type: Type.STRING,
-                description:
-                  "Condições de iluminação em Português (ex: Pôr do sol, estúdio).",
-              },
-              colors: {
-                type: Type.ARRAY,
-                items: { type: Type.STRING },
-                description: "Paleta de cores dominantes em Português.",
-              },
-            },
-            required: ["description", "objects", "mood", "lighting", "colors"],
-          },
-        },
-      });
+            { text: "Analise esta imagem detalhadamente. Forneça o resultado em Português do Brasil. Extraia a descrição da cena, objetos principais, humor, iluminação e cores dominantes." }
+          ]
+        }],
+        generationConfig: {
+            temperature: 0.2,
+            responseMimeType: "application/json",
+            // Removed thinking config to save budget since 1.5-pro can do JSON out of the box
+        }
+      };
 
-      const text = response.text;
+      const data = await callProxy('VISION_ANALYZE', 'generateContent', payload);
+      const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+      
       if (!text) throw new Error("Nenhum resultado de análise retornado.");
       return JSON.parse(text) as AnalysisResult;
   } catch(e) {
@@ -184,124 +168,98 @@ export const analyzeImage = async (file: File): Promise<AnalysisResult> => {
   }
 };
 
-export const editImage = async (
-  originalFile: File,
-  prompt: string,
-  maskCoords: number[] | null = null
-  ): Promise<string> => {
-  const ai = getClient();
+export const editImage = async (originalFile: File, prompt: string, maskCoords: number[] | null = null): Promise<string> => {
   const imagePart = await fileToGenerativePart(originalFile);
   
-  const modelId = localStorage.getItem("lumina_image_model") || "imagen-4.0-generate-001";
-
-  // If coordinates are provided, enhance the prompt for spatial grounding
-  const enhancedPrompt = maskCoords 
-    ? `${prompt}. Focus the edit execution only on the region described by coordinates [ymin, xmin, ymax, xmax]: [${maskCoords.join(', ')}].`
-    : prompt;
+  // Imagens via Imagen usam generateImages e o SDK é diferente no backend via REST.
+  // Para Imagen, o endpoint generateImages na v1beta pede instancias.
+  // Como construímos o proxy para repassar o payload cru, passamos o payload de Imagen:
+  const payload = {
+    instances: [
+        { prompt: maskCoords ? `${prompt} [Region: ${maskCoords.join(', ')}]` : prompt, image: { bytesBase64Encoded: imagePart.data } }
+    ],
+    parameters: { sampleCount: 1 }
+  };
 
   try {
-    const response = await ai.models.generateContent({
-      model: modelId,
-      contents: {
-        parts: [
-          { inlineData: imagePart }, 
-          { text: enhancedPrompt }
-        ],
-      },
-    });
-
-    for (const part of response.candidates?.[0]?.content?.parts || []) {
-       if (part.inlineData && part.inlineData.data) {
-         return `data:image/png;base64,${part.inlineData.data}`;
-       }
-    }
+    const data = await callProxy('IMAGE_EDIT', 'generateImages', payload);
+    const generatedImageBase64 = data?.predictions?.[0]?.bytesBase64Encoded;
     
-    logger.warn("Modelo retornou texto em vez de imagem: " + (response.text || "(vazio)"));
-    if (modelId.includes("imagen") || modelId.includes("image") || modelId.includes("preview")) {
-        throw new GeminiError(`O modelo selecionado (${modelId}) não retornou imagem. Verifique se ele suporta geração de imagem na sua conta.`, "GENERIC");
+    if (generatedImageBase64) {
+      return `data:image/png;base64,${generatedImageBase64}`;
     }
-    throw new GeminiError(`O modelo atual (${modelId}) apenas descreve a edição. Selecione um modelo de geração de imagem (ex: Imagen 4) nas Configurações.`, "GENERIC");
-
+    throw new GeminiError("O modelo selecionado não retornou a imagem base64 esperada.", "GENERIC");
   } catch (e: any) {
-    if (e instanceof GeminiError) throw e;
-    logger.error("Erro na API Gemini (editImage)", e);
-    
-    if (e.message?.includes("404") || e.status === 404) {
-        throw new GeminiError(`Modelo '${modelId}' não encontrado. Selecione outro nas Configurações.`, "NOT_FOUND");
-    }
     handleGeminiError(e);
   }
 };
 
 export const analyzeRoboticsSpatial = async (file: File) => {
   try {
-      const ai = getClient();
       const imagePart = await fileToGenerativePart(file);
+      const prompt = 'Point to all items in the image. The label returned should be an identifying name for the object detected. The answer should follow the json format: [{"point": [y, x], "label": "label"}, ...]. The points are in [y, x] format normalized to 0-1000.';
 
-      const prompt =
-        'Point to all items in the image. The label returned should be an identifying name for the object detected. The answer should follow the json format: [{"point": [y, x], "label": "label"}, ...]. The points are in [y, x] format normalized to 0-1000.';
+      const payload = {
+        contents: [{ parts: [{ inlineData: imagePart }, { text: prompt }] }],
+        generationConfig: { responseMimeType: "application/json" }
+      };
 
-      const response = await ai.models.generateContent({
-        model: "gemini-robotics-er-1.5-preview", // Check if this model is still valid/generic enough? Assuming yes.
-        contents: {
-          parts: [{ inlineData: imagePart }, { text: prompt }],
-        },
-        config: {
-          responseMimeType: "application/json",
-        },
-      });
-
-      const text = response.text;
-      if (!text) throw new Error("Nenhum dado retornado pelo modelo Robotics.");
+      const data = await callProxy('VISION_SEGMENT', 'generateContent', payload);
+      const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (!text) throw new Error("Nenhum dado retornado.");
       return JSON.parse(text);
   } catch(e) {
       handleGeminiError(e);
   }
 };
 
-export const segmentObject = async (
-  file: File,
-  label: string,
-  ): Promise<string> => {
+export const segmentObject = async (file: File, label: string): Promise<string> => {
   try {
-      const ai = getClient();
       const imagePart = await fileToGenerativePart(file);
-
       const prompt = `Segment the object "${label}" precisely. Return the object as an image part with a transparent background. Deliver the base64 result.`;
 
-      const response = await ai.models.generateContent({
-        model: "gemini-2.0-flash-exp",
-        contents: {
-          parts: [{ inlineData: imagePart }, { text: prompt }],
-        },
-      });
+      const payload = {
+        contents: [{ parts: [{ inlineData: imagePart }, { text: prompt }] }]
+      };
 
-      for (const part of response.candidates?.[0]?.content?.parts || []) {
+      const data = await callProxy('VISION_SEGMENT', 'generateContent', payload);
+      for (const part of data?.candidates?.[0]?.content?.parts || []) {
         if (part.inlineData && part.inlineData.data) {
           return `data:image/png;base64,${part.inlineData.data}`;
         }
       }
-
       throw new Error("Falha ao segmentar objeto.");
   } catch(e) {
       handleGeminiError(e);
   }
 };
 
+/* ============================================================
+   TRANSLATION SEPARATION
+============================================================ */
 
-export const translateToPortuguese = async (text: string): Promise<string> => {
+export const translatePromptToEnglishForImagen = async (text: string): Promise<string> => {
   try {
-    const ai = getClient();
-    const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview", 
-      contents: {
-        parts: [{ text: `Aja como um tradutor profissional. Traduza o seguinte prompt de geração de imagem do Inglês para o Português do Brasil. Mantenha os termos técnicos de fotografia/design em inglês se for padrão da indústria, mas adapte a descrição da cena para PT-BR.\n\nTexto: "${text}"` }]
-      }
-    });
-
-    return response.text?.trim() || text;
+    const payload = {
+      contents: [{ parts: [{ text: `Act as a professional photography translator. Translate the following image generation prompt from Portuguese to English. Maintain professional photography and design terminology.\n\nText: "${text}"` }] }]
+    };
+    const data = await callProxy('FAST_UTILITY', 'generateContent', payload);
+    return data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || text;
   } catch (e) {
-    logger.error("Erro na tradução", e);
+    logger.error("Erro na tradução para Inglês", e);
+    return text;
+  }
+};
+
+export const translatePromptToPtBrForUser = async (text: string): Promise<string> => {
+  try {
+    const payload = {
+      contents: [{ parts: [{ text: `Traduza de volta para Português do Brasil com tom natural e claro.\n\nTexto: "${text}"` }] }]
+    };
+    const data = await callProxy('FAST_UTILITY', 'generateContent', payload);
+    return data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || text;
+  } catch (e) {
+    logger.error("Erro na tradução para PT-BR", e);
     return text;
   }
 };
@@ -311,167 +269,104 @@ export const translateToPortuguese = async (text: string): Promise<string> => {
    IMAGE GENERATION
 ============================================================ */
 
-export const generateImage = async (
-  prompt: string,
-  aspectRatio: AspectRatio,
-): Promise<string> => {
-  const ai = getClient();
-
-  const selectedModel =
-    localStorage.getItem("lumina_image_model") ||
-    "imagen-4.0-generate-001";
-
+export const generateImage = async (prompt: string, aspectRatio: AspectRatio): Promise<string> => {
   try {
-    /* =============================
-       IMAGEN MODELS
-    ============================== */
-   if (IMAGEN_MODELS.includes(selectedModel)) {
-  const response = await ai.models.generateImages({
-    model: selectedModel,
-    prompt,
-    config: {
-      numberOfImages: 1,
-      aspectRatio: aspectRatio.toString(),
-      // REMOVIDO:
-      // safetyFilterLevel
-      // personGeneration
-    },
-  });
+      // Always use IMAGE_GENERATE capability (Imagen models)
+      const englishPrompt = await translatePromptToEnglishForImagen(prompt);
+      
+      const payload = {
+        instances: [{ prompt: englishPrompt }],
+        parameters: { sampleCount: 1, aspectRatio: aspectRatio.toString() }
+      };
 
-  const image = response.generatedImages?.[0];
+      const data = await callProxy('IMAGE_GENERATE', 'generateImages', payload);
+      const imageBytes = data?.predictions?.[0]?.bytesBase64Encoded;
 
-  if (!image?.image?.imageBytes) {
-    throw new Error(
-      "Modelo Imagen não retornou imagem válida.",
-    );
-  }
-
-  return `data:image/png;base64,${image.image.imageBytes}`;
-}
-    /* =============================
-       GEMINI IMAGE MODELS
-    ============================== */
-    if (GEMINI_IMAGE_MODELS.includes(selectedModel)) {
-      const response = await ai.models.generateContent({
-        model: selectedModel,
-        contents: prompt,
-      });
-
-      const parts =
-        response.candidates?.[0]?.content?.parts || [];
-
-      for (const part of parts) {
-        if (part.inlineData?.data) {
-          return `data:image/png;base64,${part.inlineData.data}`;
-        }
+      if (!imageBytes) {
+        throw new Error("Modelo não retornou imagem válida.");
       }
-
-      throw new Error(
-        "Modelo Gemini não retornou imagem inlineData.",
-      );
-    }
-
-    throw new GeminiError(
-      `Modelo não suportado: ${selectedModel}`,
-      "NOT_FOUND",
-    );
+      return `data:image/png;base64,${imageBytes}`;
   } catch (e) {
     handleGeminiError(e);
   }
 };
 
-/**
- * Low-latency response using Gemini 2.5 Flash Lite.
- */
+/* ============================================================
+   UTILITIES
+============================================================ */
+
 export const fastQuery = async (prompt: string): Promise<string> => {
   try {
-      const ai = getClient();
-      const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash-lite-latest",
-        contents: prompt,
-      });
-      return response.text || "Sem resposta rápida disponível.";
+      const payload = { contents: [{ parts: [{ text: prompt }] }] };
+      const data = await callProxy('FAST_UTILITY', 'generateContent', payload);
+      return data?.candidates?.[0]?.content?.parts?.[0]?.text || "Sem resposta rápida disponível.";
   } catch(e) {
       handleGeminiError(e);
   }
 };
 
 /**
- * Chat with Gemini 3 Pro Preview.
+ * Chat Simulation - For real chat sessions, passing history manually
  */
 export const startChat = (systemInstruction: string) => {
-  const ai = getClient();
-  return ai.chats.create({
-    model: "gemini-3-pro-preview",
-    config: {
-      systemInstruction,
-      thinkingConfig: { thinkingBudget: 32768 },
-    },
-  });
+   let history: any[] = [];
+   
+   return {
+      sendMessage: async (params: { message: string }) => {
+         history.push({ role: 'user', parts: [{ text: params.message }] });
+         
+         const payload = {
+             systemInstruction: { parts: [{ text: systemInstruction }] },
+             contents: history,
+         };
+         
+         const data = await callProxy('CHAT_COMPLEX', 'generateContent', payload);
+         const textObj = data?.candidates?.[0]?.content?.parts?.[0];
+         const textOut = textObj?.text || "";
+         
+         if (textOut) {
+            history.push({ role: 'model', parts: [{ text: textOut }] });
+         }
+         return { text: textOut };
+      }
+   };
 };
 
-/**
- * Search Grounding using Gemini 3 Flash Preview.
- * Returns text and grounding chunks for citations.
- */
 export const searchWithGrounding = async (query: string) => {
   try {
-      const ai = getClient();
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: query,
-        config: {
-          tools: [{ googleSearch: {} }],
-        },
-      });
-
-      const text = response.text;
-      const sources =
-        response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+      const payload = {
+         contents: [{ parts: [{ text: query }] }],
+         tools: [{ googleSearch: {} }] // Requesting grounding
+      };
+      const data = await callProxy('FAST_UTILITY', 'generateContent', payload);
+      const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+      const sources = data?.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
       return { text, sources };
   } catch(e) {
       handleGeminiError(e);
   }
 };
 
-export const generateDescription = async (
-  imageInput: File | string,
-  prompt: string = "Atue como um especialista em e-commerce. Crie uma descrição curta e atraente para este produto."
-): Promise<string> => {
+export const generateDescription = async (imageInput: File | string, prompt: string = "Atue como um especialista em e-commerce. Crie uma descrição curta e atraente para este produto."): Promise<string> => {
     try {
         let imagePart: { mimeType: string, data: string };
-        
         if (imageInput instanceof File) {
-            if (imageInput.size > 4 * 1024 * 1024) {
-                throw new GeminiError("A imagem é muito grande. Por favor, use uma imagem menor que 4MB.", "GENERIC");
-            }
             imagePart = await fileToGenerativePart(imageInput);
         } else if (imageInput.startsWith('data:')) {
             const base64Data = imageInput.split(',')[1];
             const mimeType = imageInput.split(';')[0].split(':')[1];
             imagePart = { mimeType, data: base64Data };
         } else {
-             try {
-                const resp = await fetch(imageInput);
-                const blob = await resp.blob();
-                imagePart = await fileToGenerativePart(new File([blob], "image.png", { type: blob.type }));
-             } catch(err) {
-                 throw new GeminiError("Falha ao processar imagem para análise.", "GENERIC");
-             }
+             const resp = await fetch(imageInput);
+             const blob = await resp.blob();
+             imagePart = await fileToGenerativePart(new File([blob], "image.png", { type: blob.type }));
         }
 
-        const ai = getClient();
-        const response = await ai.models.generateContent({
-            model: "gemini-1.5-flash", // Modelo atualizado conforme solicitação
-            contents: {
-                parts: [
-                    { inlineData: imagePart },
-                    { text: prompt }
-                ]
-            }
-        });
-        
-        return response.text || "Sem descrição disponível.";
+        const payload = {
+           contents: [{ parts: [{ inlineData: imagePart }, { text: prompt }] }]
+        };
+        const data = await callProxy('FAST_UTILITY', 'generateContent', payload);
+        return data?.candidates?.[0]?.content?.parts?.[0]?.text || "Sem descrição disponível.";
     } catch (e) {
         if (e instanceof GeminiError) throw e;
         handleGeminiError(e);

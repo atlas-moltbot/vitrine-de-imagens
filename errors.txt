@@ -1,0 +1,4 @@
+App.tsx(9,3): error TS2305: Module '"@/services/geminiService"' has no exported member 'translateToPortuguese'.
+components/ProductPage.tsx(11,10): error TS2305: Module '"../services/geminiService"' has no exported member 'translateToPortuguese'.
+services/geminiService.ts(3,46): error TS2307: Cannot find module './ModelRouter' or its corresponding type declarations.
+src/components/ImageEditor.tsx(29,16): error TS2678: Type '"UNKNOWN"' is not comparable to type '"QUOTA" | "CONTENT" | "GENERIC" | "NOT_FOUND" | "NETWORK" | "TIMEOUT"'.

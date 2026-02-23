@@ -6,7 +6,6 @@ import {
   base64ToFile,
   analyzeRoboticsSpatial,
   segmentObject,
-  translateToPortuguese,
   GeminiError,
 } from "@/services/geminiService";
 import {

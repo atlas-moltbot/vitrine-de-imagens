@@ -26,8 +26,8 @@ export const ImageEditor = () => {
           case 'CONTENT':
             setErrorMsg("🛡️ A IA bloqueou esta imagem por motivos de segurança.");
             break;
-          case 'UNKNOWN': // Ajustado para bater com os tipos comuns
           case 'NETWORK':
+          case 'TIMEOUT':
             setErrorMsg("🌐 Erro de conexão ou rede.");
             break;
           default:

@@ -10,9 +10,12 @@
   },
   "dependencies": {
     "@google/genai": "^1.39.0",
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
     "html2canvas": "1.4.1",
     "jspdf": "2.5.1",
     "jszip": "3.10.1",
+    "node-fetch": "^3.3.2",
     "react": "^19.2.4",
     "react-dom": "^19.2.4"
   },
