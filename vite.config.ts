@@ -6,6 +6,7 @@ import tailwindcss from '@tailwindcss/vite';
 export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, '.', '');
     return {
+      base: './', // Fix for asset paths on Hostinger
       server: {
         host: '0.0.0.0', // Permite acesso via IP (ex: 192.168.1.10)
         port: 3000,      // Define a porta para 3000
