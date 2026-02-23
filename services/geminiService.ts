@@ -91,11 +91,14 @@ async function fetchWithRetry(url: string, options: RequestInit, maxRetries = 2)
 async function callProxy(capability: ModelCapability, endpoint: 'generateContent' | 'generateImages', payload: any) {
   let model = ModelRouter.getModel(capability);
   
+  // Define if this call belongs to the Chatbot/Atlas
+  const isChat = capability === 'CHAT_COMPLEX' || capability === 'FAST_UTILITY';
+
   try {
       return await fetchWithRetry(PROXY_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ endpoint, model, payload }),
+        body: JSON.stringify({ endpoint, model, payload, isChat }),
       });
   } catch (error: any) {
       // Automatic Fallback Check logic for 404
@@ -106,7 +109,7 @@ async function callProxy(capability: ModelCapability, endpoint: 'generateContent
             return await fetchWithRetry(PROXY_URL, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ endpoint, model: fallbackModel, payload }),
+              body: JSON.stringify({ endpoint, model: fallbackModel, payload, isChat }),
             });
          }
       }
@@ -312,8 +315,12 @@ export const startChat = (systemInstruction: string) => {
    let history: any[] = [];
    
    return {
-      sendMessage: async (params: { message: string }) => {
-         history.push({ role: 'user', parts: [{ text: params.message }] });
+      sendMessage: async (params: { message: string, fileParts?: { mimeType: string, data: string }[] }) => {
+         const parts: any[] = [{ text: params.message }];
+         if (params.fileParts) {
+             params.fileParts.forEach(p => parts.push({ inlineData: p }));
+         }
+         history.push({ role: 'user', parts });
          
          const payload = {
              systemInstruction: { parts: [{ text: systemInstruction }] },

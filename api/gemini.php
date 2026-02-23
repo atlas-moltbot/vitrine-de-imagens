@@ -8,6 +8,21 @@ header("Content-Type: application/json");
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(200);
     exit();
+}
+
+// Carregar .env na raiz do projeto (seguro, fora do acesso publico direto do proxy)
+$envPath = __DIR__ . '/../.env';
+if (file_exists($envPath)) {
+    $lines = file($envPath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+    foreach ($lines as $line) {
+        if (strpos(trim($line), '#') === 0) continue;
+        $parts = explode('=', $line, 2);
+        if (count($parts) === 2) {
+            putenv(trim($parts[0]) . '=' . trim($parts[1], '"\' '));
+        }
+    }
+}
+
 // Carregar config.php local, caso exista, para injetar variaveis de ambiente ou constantes
 if (file_exists(__DIR__ . '/config.php')) {
     require_once __DIR__ . '/config.php';
@@ -20,8 +35,19 @@ if ($method !== 'POST') {
     exit();
 }
 
+// Ler o corpo da requisição do front-end
+$inputJSON = file_get_contents('php://input');
+$inputData = json_decode($inputJSON, true);
+
+$isChat = isset($inputData['isChat']) && $inputData['isChat'];
+
 // Obter a chave da API do ambiente (seguro) ou da constante definida em config.php
 $apiKey = getenv('GEMINI_API_KEY');
+
+// Usar chave específica de chat, se aplicável e existente
+if ($isChat && getenv('GEMINI_CHAT_API_KEY')) {
+    $apiKey = getenv('GEMINI_CHAT_API_KEY');
+}
 
 if (!$apiKey && defined('GEMINI_API_KEY')) {
     $apiKey = GEMINI_API_KEY;
@@ -37,10 +63,6 @@ if (!$apiKey) {
     echo json_encode(['error' => 'API Key não configurada no servidor (GEMINI_API_KEY).']);
     exit();
 }
-
-// Ler o corpo da requisição do front-end
-$inputJSON = file_get_contents('php://input');
-$inputData = json_decode($inputJSON, true);
 
 if (!$inputData || !isset($inputData['endpoint'])) {
     http_response_code(400);

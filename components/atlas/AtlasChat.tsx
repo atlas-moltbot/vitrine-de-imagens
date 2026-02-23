@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { startChat, fastQuery, searchWithGrounding } from '../../services/geminiService';
+import { startChat, fastQuery, searchWithGrounding, fileToGenerativePart } from '../../services/geminiService';
 import { LoadingSpinner } from '../LoadingSpinner';
-import { IconBrain, IconZap, IconX, IconSparkles, IconSettings, IconTrash } from '../Icons';
+import { IconBrain, IconZap, IconX, IconSparkles, IconSettings, IconTrash, IconUpload } from '../Icons';
 import { getSystemPrompt, saveAtlasMemory, loadAtlasMemory, clearAtlasMemory, AgentProfile, AgentContext } from './AtlasAgent';
 import { Tooltip } from '../Tooltip';
 
@@ -10,6 +10,7 @@ interface Message {
   text: string;
   isSearch?: boolean;
   sources?: any[];
+  filePreview?: string;
 }
 
 export const AtlasChat: React.FC = () => {
@@ -22,6 +23,10 @@ export const AtlasChat: React.FC = () => {
   const [profile, setProfile] = useState<AgentProfile>('Standard');
   const [userLinks, setUserLinks] = useState<string>('');
   const [showSettings, setShowSettings] = useState(false);
+  
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [filePreview, setFilePreview] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // We keep a reference to the active gemini chat session
   const chatRef = useRef<any>(null);
@@ -65,15 +70,28 @@ export const AtlasChat: React.FC = () => {
       // To properly sync, we'd need to modify `geminiService.ts`, but this works as visual memory.
   };
 
-  const handleSend = async () => {
-    if (!input.trim() || isTyping) return;
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+        setSelectedFile(file);
+        setFilePreview(URL.createObjectURL(file));
+    }
+  };
 
-    const currentInput = input;
-    const userMessage: Message = { role: 'user', text: currentInput };
+  const handleSend = async () => {
+    if ((!input.trim() && !selectedFile) || isTyping) return;
+
+    const currentInput = input || "Analise o arquivo anexado.";
+    const userMessage: Message = { role: 'user', text: currentInput, filePreview: filePreview || undefined };
     
     setMessages(prev => [...prev, userMessage]);
     setInput('');
     setIsTyping(true);
+
+    const fileToSend = selectedFile;
+    setSelectedFile(null);
+    setFilePreview(null);
+    if (fileInputRef.current) fileInputRef.current.value = '';
 
     try {
       if (mode === 'search') {
@@ -85,7 +103,12 @@ export const AtlasChat: React.FC = () => {
         if (!chatRef.current) {
             await initChatSession();
         }
-        const result = await chatRef.current.sendMessage({ message: currentInput });
+        let fileParts;
+        if (fileToSend) {
+            const part = await fileToGenerativePart(fileToSend);
+            fileParts = [part];
+        }
+        const result = await chatRef.current.sendMessage({ message: currentInput, fileParts });
         setMessages(prev => [...prev, { role: 'model', text: result.text }]);
       }
     } catch (err) {
@@ -214,6 +237,7 @@ export const AtlasChat: React.FC = () => {
                     ? 'bg-indigo-600/90 text-zinc-100 border border-indigo-500/50 rounded-br-sm shadow-md'
                     : 'bg-zinc-800/80 text-zinc-300 border border-zinc-700/50 rounded-bl-sm shadow-sm'
                 }`}>
+                  {m.filePreview && <img src={m.filePreview} alt="User Upload" className="w-full max-w-[200px] rounded-lg mb-2 border border-white/20" />}
                   <p className="whitespace-pre-wrap font-sans">{m.text}</p>
                   
                   {m.isSearch && m.sources && m.sources.length > 0 && (
@@ -248,9 +272,27 @@ export const AtlasChat: React.FC = () => {
             )}
           </div>
 
-          {/* Input */}
-          <div className="px-4 py-4 bg-zinc-900/60 border-t border-zinc-800/50">
-            <div className="flex gap-2 relative">
+          {/* Input Area */}
+          <div className="bg-zinc-900/60 border-t border-zinc-800/50">
+            {filePreview && (
+              <div className="px-4 py-2 border-b border-zinc-800/50 flex items-center justify-between bg-zinc-900/80">
+                <div className="flex items-center gap-2">
+                  <img src={filePreview} alt="Preview" className="w-10 h-10 object-cover rounded-md border border-zinc-700" />
+                  <span className="text-xs text-zinc-400 truncate max-w-[200px]">{selectedFile?.name}</span>
+                </div>
+                <button onClick={() => { setSelectedFile(null); setFilePreview(null); if (fileInputRef.current) fileInputRef.current.value = ''; }} className="text-zinc-500 hover:text-zinc-300 p-1">
+                  <IconX />
+                </button>
+              </div>
+            )}
+            <div className="px-4 py-4 flex gap-2 relative">
+              <input type="file" className="hidden" ref={fileInputRef} onChange={handleFileSelect} accept="image/*,.pdf,.txt" />
+              <button 
+                  onClick={() => fileInputRef.current?.click()} 
+                  className="px-3 shrink-0 text-zinc-400 hover:text-indigo-400 bg-zinc-800/80 hover:bg-zinc-700 border border-zinc-700 rounded-xl transition-colors flex items-center justify-center"
+              >
+                  <IconUpload className="w-4 h-4" />
+              </button>
               <input
                 type="text"
                 value={input}
