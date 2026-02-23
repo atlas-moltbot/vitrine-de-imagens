@@ -29,7 +29,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onStart }) => {
           <nav className="hidden md:flex items-center gap-6 text-sm text-zinc-400 font-medium">
              <a href="#features" className="hover:text-zinc-200 transition-colors">Recursos</a>
              <a href="#showcase" className="hover:text-zinc-200 transition-colors">Showcase</a>
-             <a href="https://deepmind.google/technologies/gemini/" target="_blank" rel="noopener noreferrer" className="hover:text-zinc-200 transition-colors">Gemini 2.0</a>
+             <a href="https://deepmind.google/technologies/gemini/" target="_blank" rel="noopener noreferrer" className="hover:text-zinc-200 transition-colors">Gemini 3</a>
           </nav>
           <button 
             onClick={onStart}
@@ -49,7 +49,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onStart }) => {
                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
                   <span className="relative inline-flex rounded-full h-2 w-2 bg-indigo-500"></span>
                 </span>
-                Powered by Gemini 2.0 Flash & Imagen 4
+                Powered by Gemini 3 Flash & Imagen 4
              </div>
            </div>
 
@@ -184,6 +184,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onStart }) => {
               <div className="flex items-center gap-2">
                  <div className="w-6 h-6 bg-zinc-800 rounded-md flex items-center justify-center text-xs font-bold text-zinc-400">V</div>
                  <span className="font-medium text-zinc-400 text-sm">Atlas Studio &copy; 2026</span>
+                  <span className="px-2 py-0.5 text-[10px] font-mono font-bold tracking-wider bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 rounded-full">v1.0</span>
               </div>
               <div className="flex gap-6 text-sm text-zinc-500">
                  <a href="#" className="hover:text-zinc-300">Privacidade</a>
